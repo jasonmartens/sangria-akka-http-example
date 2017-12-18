@@ -1,117 +1,99 @@
-import sangria.execution.deferred.{Fetcher, HasId}
-import sangria.schema._
+import java.util.UUID
 
-import scala.concurrent.Future
+import sangria.ast.{Document, FieldDefinition, ObjectTypeDefinition, TypeDefinition}
+import sangria.execution.{ExecutionScheme, Executor}
+import sangria.execution.deferred.{Deferred, DeferredResolver, Fetcher, HasId}
+import sangria.parser.QueryParser
+import sangria.schema._
+import spray.json._
+import sangria.macros._
+import sangria.marshalling.{InputUnmarshaller, ResultMarshaller}
+import sangria.marshalling.sprayJson._
+
+import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.ExecutionContext.Implicits.global
+
+
 
 /**
  * Defines a GraphQL schema for the current project
  */
 object SchemaDefinition {
-  /**
-    * Resolves the lists of characters. These resolutions are batched and
-    * cached for the duration of a query.
-    */
-  val characters = Fetcher.caching(
-    (ctx: CharacterRepo, ids: Seq[String]) ⇒
-      Future.successful(ids.flatMap(id ⇒ ctx.getHuman(id) orElse ctx.getDroid(id))))(HasId(_.id))
+  import sangria.marshalling.sprayJson._
+  import DefaultJsonProtocol._
 
-  val EpisodeEnum = EnumType(
-    "Episode",
-    Some("One of the films in the Star Wars Trilogy"),
-    List(
-      EnumValue("NEWHOPE",
-        value = Episode.NEWHOPE,
-        description = Some("Released in 1977.")),
-      EnumValue("EMPIRE",
-        value = Episode.EMPIRE,
-        description = Some("Released in 1980.")),
-      EnumValue("JEDI",
-        value = Episode.JEDI,
-        description = Some("Released in 1983."))))
+  val sdlSchemaString = """
+      | type Human {
+      |  id: ID!
+      |  name: String!
+      |}
+      |
+      | type Query {
+      |   hero(id: ID!): Human
+      | }
+      |
+      | schema {
+      |   query: Query
+      | }
+    """.stripMargin
+  lazy val ast = QueryParser.parse(sdlSchemaString).get
 
-  val Character: InterfaceType[CharacterRepo, Character] =
-    InterfaceType(
-      "Character",
-      "A character in the Star Wars Trilogy",
-      () ⇒ fields[CharacterRepo, Character](
-        Field("id", StringType,
-          Some("The id of the character."),
-          resolve = _.value.id),
-        Field("name", OptionType(StringType),
-          Some("The name of the character."),
-          resolve = _.value.name),
-        Field("friends", ListType(Character),
-          Some("The friends of the character, or an empty list if they have none."),
-          resolve = ctx ⇒ characters.deferSeqOpt(ctx.value.friends)),
-        Field("appearsIn", OptionType(ListType(OptionType(EpisodeEnum))),
-          Some("Which movies they appear in."),
-          resolve = _.value.appearsIn map (e ⇒ Some(e)))
-      ))
+  class MyRepo {
+    def loadObject(tpe: TypeDefinition, field: FieldDefinition) : String = {
+        if (tpe.name == "Human" && field.name == "id")
+          "1"
+        else if (tpe.name == "Human" && field.name == "name")
+          "BB8"
+        else {
+          ""
+      }
+    }
 
-  val Human =
-    ObjectType(
-      "Human",
-      "A humanoid creature in the Star Wars universe.",
-      interfaces[CharacterRepo, Human](Character),
-      fields[CharacterRepo, Human](
-        Field("id", StringType,
-          Some("The id of the human."),
-          resolve = _.value.id),
-        Field("name", OptionType(StringType),
-          Some("The name of the human."),
-          resolve = _.value.name),
-        Field("friends", ListType(Character),
-          Some("The friends of the human, or an empty list if they have none."),
-          resolve = ctx ⇒ characters.deferSeqOpt(ctx.value.friends)),
-        Field("appearsIn", OptionType(ListType(OptionType(EpisodeEnum))),
-          Some("Which movies they appear in."),
-          resolve = _.value.appearsIn map (e ⇒ Some(e))),
-        Field("homePlanet", OptionType(StringType),
-          Some("The home planet of the human, or null if unknown."),
-          resolve = _.value.homePlanet)
-      ))
+    def loadObjects(ids: Seq[UUID]): Future[Seq[JsObject]] = {
+      Future.successful(Seq(JsObject()))
+    }
+  }
 
-  val Droid = ObjectType(
-    "Droid",
-    "A mechanical creature in the Star Wars universe.",
-    interfaces[CharacterRepo, Droid](Character),
-    fields[CharacterRepo, Droid](
-      Field("id", StringType,
-        Some("The id of the droid."),
-        tags = ProjectionName("_id") :: Nil,
-        resolve = _.value.id),
-      Field("name", OptionType(StringType),
-        Some("The name of the droid."),
-        resolve = ctx ⇒ Future.successful(ctx.value.name)),
-      Field("friends", ListType(Character),
-        Some("The friends of the droid, or an empty list if they have none."),
-        resolve = ctx ⇒ characters.deferSeqOpt(ctx.value.friends)),
-      Field("appearsIn", OptionType(ListType(OptionType(EpisodeEnum))),
-        Some("Which movies they appear in."),
-        resolve = _.value.appearsIn map (e ⇒ Some(e))),
-      Field("primaryFunction", OptionType(StringType),
-        Some("The primary function of the droid."),
-        resolve = _.value.primaryFunction)
-    ))
+  // Fetcher/Deferred resolvers
+//  implicit val hasId = HasId[JsObject, UUID](_.fields.get("id").map(id => UUID.fromString(id.convertTo[String])).get)
+//  lazy val genericFetcher = Fetcher((ctx: MyRepo, ids: Seq[UUID]) ⇒ ctx.loadObjects(ids))
+//  lazy val fetcherResolver: DeferredResolver[MyRepo] = DeferredResolver.fetchers(genericFetcher)
 
-  val ID = Argument("id", StringType, description = "id of the character")
+//  lazy val fetcherGenericResolver: FieldResolver[MyRepo] = FieldResolver[MyRepo](
+//    resolve = {
+//      case (tpe, field) => ctx =>
+//        genericFetcher.defer(UUID.randomUUID())
+//    }
+//  )
 
-  val EpisodeArg = Argument("episode", OptionInputType(EpisodeEnum),
-    description = "If omitted, returns the hero of the whole saga. If provided, returns the hero of that particular episode.")
 
-  val Query = ObjectType(
-    "Query", fields[CharacterRepo, Unit](
-      Field("hero", Character,
-        arguments = EpisodeArg :: Nil,
-        deprecationReason = Some("Use `human` or `droid` fields instead"),
-        resolve = (ctx) ⇒ ctx.ctx.getHero(ctx.arg(EpisodeArg))),
-      Field("human", OptionType(Human),
-        arguments = ID :: Nil,
-        resolve = ctx ⇒ ctx.ctx.getHuman(ctx arg ID)),
-      Field("droid", Droid,
-        arguments = ID :: Nil,
-        resolve = Projector((ctx, f) ⇒ ctx.ctx.getDroid(ctx arg ID).get))
-    ))
+  class GenericDeferredResolver extends DeferredResolver[Any] {
+    def resolve(deferred: Vector[Deferred[Any]], ctx: Any, queryState: Any)(implicit ec: ExecutionContext): Vector[Future[JsObject]] = {
+        Vector(Future.successful(JsObject(("hello", JsString("world")))))
+    }
+  }
+//  lazy val fetcherResolver: sangria.execution.deferred.DeferredResolver[Any] = new GenericDeferredResolver
 
-  val StarWarsSchema = Schema(Query)
+  // Builder-based resolvers
+  lazy val genericResolver: FieldResolver[MyRepo] = FieldResolver[MyRepo](
+    resolve = {
+      case (tpe, field) => ctx =>
+        Value(ctx.ctx.loadObject(tpe, field))
+    })
+  lazy val builder = AstSchemaBuilder.resolverBased[MyRepo](
+    InstanceCheck.field[MyRepo, JsValue],
+    genericResolver,
+    FieldResolver.defaultInput[MyRepo, JsValue])
+  lazy val schema: Schema[MyRepo, Any] = Schema.buildFromAst[MyRepo](ast, builder.validateSchemaWithException(ast))
+
+//  lazy val queryAst: Document = QueryParser.parse("""{ hero { id name } }""").get
+
+  lazy val nonBuilderSchema: Schema[Any, Any] = Schema.buildFromAst(ast)
+
+  def execute(qAst: Document, variables: JsValue) = {
+    import sangria.marshalling.sprayJson._
+    Executor.execute(
+      schema = schema, queryAst = qAst, userContext = new MyRepo, root = JsObject(), variables = variables, deferredResolver = new GenericDeferredResolver)
+  }
+
 }

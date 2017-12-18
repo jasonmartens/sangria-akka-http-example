@@ -14,12 +14,12 @@ import spray.json._
 import scala.util.{Failure, Success}
 
 object Server extends App {
-  implicit val system = ActorSystem("sangria-server")
-  implicit val materializer = ActorMaterializer()
+  implicit lazy val system = ActorSystem("sangria-server")
+  implicit lazy val materializer = ActorMaterializer()
 
   import system.dispatcher
 
-  val route: Route =
+  lazy val route: Route =
     (post & path("graphql")) {
       entity(as[JsValue]) { requestJson ⇒
         val JsObject(fields) = requestJson
@@ -38,11 +38,15 @@ object Server extends App {
         QueryParser.parse(query) match {
 
           // query parsed successfully, time to execute it!
-          case Success(queryAst) ⇒
-            complete(Executor.execute(SchemaDefinition.StarWarsSchema, queryAst, new CharacterRepo,
-                variables = vars,
-                operationName = operation,
-                deferredResolver = DeferredResolver.fetchers(SchemaDefinition.characters))
+          case Success(qAst) ⇒
+            complete(
+//              Executor.execute(schema = SchemaDefinition.schema, queryAst = queryAst, userContext = new MyRepo)
+              SchemaDefinition.execute(qAst, vars)
+//              Executor.execute(schema = SchemaDefinition.schema, queryAst = qAst, deferredResolver = SchemaDefinition.fetcherResolver)
+//              Executor.execute(SchemaDefinition.StarWarsSchema, qAst, new CharacterRepo,
+//                variables = vars,
+//                operationName = operation,
+//                fetcherResolver = DeferredResolver.fetchers(SchemaDefinition.characters))
               .map(OK → _)
               .recover {
                 case error: QueryAnalysisError ⇒ BadRequest → error.resolveError
@@ -59,5 +63,6 @@ object Server extends App {
       getFromResource("graphiql.html")
     }
 
+  println("Listening on 0.0.0.0:8080")
   Http().bindAndHandle(route, "0.0.0.0", sys.props.get("http.port").fold(8080)(_.toInt))
 }
