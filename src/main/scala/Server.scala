@@ -40,13 +40,7 @@ object Server extends App {
           // query parsed successfully, time to execute it!
           case Success(qAst) ⇒
             complete(
-//              Executor.execute(schema = SchemaDefinition.schema, queryAst = queryAst, userContext = new MyRepo)
               SchemaDefinition.execute(qAst, vars)
-//              Executor.execute(schema = SchemaDefinition.schema, queryAst = qAst, deferredResolver = SchemaDefinition.fetcherResolver)
-//              Executor.execute(SchemaDefinition.StarWarsSchema, qAst, new CharacterRepo,
-//                variables = vars,
-//                operationName = operation,
-//                fetcherResolver = DeferredResolver.fetchers(SchemaDefinition.characters))
               .map(OK → _)
               .recover {
                 case error: QueryAnalysisError ⇒ BadRequest → error.resolveError
