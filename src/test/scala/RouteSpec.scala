@@ -25,5 +25,16 @@ class RouteSpec extends WordSpec with Matchers with ScalatestRouteTest with Spra
         resp shouldEqual """{"data":{"hero":{"id":"1000","name":"BB8"}}}""".parseJson
       }
     }
+
+    "respond to queries with recursive field types" in {
+      val query = graphql"""{ hero(id: "1000") { id, name friends {id name} } }"""
+      val entity = HttpEntity(contentType = ContentTypes.`application/json`, s"""{"query": "${query.renderCompact.replaceAll("\\\"", "\\\\\"")}" } """)
+
+      Post("/graphql", entity) ~> Server.route ~> check {
+        response.status shouldBe StatusCodes.OK
+        val resp = responseAs[JsValue]
+        resp shouldEqual """{"data":{"hero":{"id":"1000","name":"BB8","friends":[{"id":"1001","name":"R2D2"},{"id":"1002","name":"C3P0"}]}}}""".parseJson
+      }
+    }
   }
 }

@@ -1,25 +1,39 @@
-import sangria.ast.{Document, FieldDefinition, TypeDefinition}
-import sangria.execution.Executor
-import sangria.execution.deferred.{Deferred, DeferredResolver}
+import sangria.ast.{AstVisitor, ObjectTypeDefinition, Argument => AstArgument, Document => AstDocument, Field => AstField, FieldDefinition => AstFieldDefinition, StringValue => AstStringValue, TypeDefinition => AstTypeDefinition}
 import sangria.parser.QueryParser
 import sangria.schema._
-import spray.json._
 
-import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.{ExecutionContext, Future}
-
-
+import scala.collection.mutable
 
 /**
- * Defines a GraphQL schema for the current project
- */
+  * Defines a GraphQL schema for the current project
+  */
 object SchemaDefinition {
-  import sangria.marshalling.sprayJson._
+  import spray.json._
+  implicit object AnyJsonFormat extends JsonFormat[Any] {
 
-  val sdlSchemaString = """
+    def write(x: Any) = x match {
+      case m: Map[String, Any] => JsObject(m.toList.map { case (k, v) => (k, v.toJson) })
+      case l: List[Any] => JsArray(l.map(_.toJson).toVector)
+      case n: Int => JsNumber(n)
+      case s: String => JsString(s)
+      case b: Boolean if b == true => JsTrue
+      case b: Boolean if b == false => JsFalse
+    }
+
+    def read(value: JsValue) = value match {
+      case JsNumber(n) => n.intValue()
+      case JsString(s) => s
+      case JsTrue => true
+      case JsFalse => false
+    }
+  }
+
+  lazy val sdlSchemaString =
+    """
       | type Droid {
       |  id: ID!
       |  name: String!
+      |  friends: [Droid!]!
       |}
       |
       | type Query {
@@ -31,61 +45,73 @@ object SchemaDefinition {
       | }
     """.stripMargin
   lazy val ast = QueryParser.parse(sdlSchemaString).get
+  lazy val schema = Schema.buildFromAst(ast)
 
-  case class DeferredString(value: String) extends Deferred[String]
-  case class DeferredObject(id: String, fieldName: String, fieldType: sangria.ast.Type) extends Deferred[Map[String, Any]]
+  def lookupByTypeAndId(tpe: String, id: String): Option[Map[String, Any]] = {
+    (id, tpe) match {
+      case ("1000", "Droid") => Some(Map("id" -> "1000", "name" -> "BB8", "friends" -> Seq("1001", "1002")))
+      case ("1001", "Droid") => Some(Map("id" -> "1001", "name" -> "R2D2", "friends" -> Seq("1000")))
+      case ("1002", "Droid") => Some(Map("id" -> "1002", "name" -> "C3P0"))
+      case _ => None
+    }
+  }
 
-  class MyRepo {
+  def resolveField(astField: AstField, schemaField: Field[_, _], obj: Map[String, Any]): Map[String, Any] = {
+    schemaField.fieldType match {
+      case ScalarType("ID", _, _, _, _, _, _, _) =>
+        Map(astField.name -> obj(astField.name))
+      case ScalarType("String", _, _, _, _, _, _, _) =>
+        Map(astField.name -> obj(astField.name))
+      case ListType(objType@ObjectType(objName, _, _, _, _, _)) =>
+        val objectIDs = obj(astField.name).asInstanceOf[List[String]]
+        val objects = objectIDs.map { id =>
+          resolveObject(id, objType, astField)
+        }
+        Map(astField.name -> objects)
+      case OptionType(objType@ObjectType(objName, _, _, _, _, _)) =>
+        astField.arguments.find(_.name == "id") match {
+          case Some(AstArgument(_, AstStringValue(value, _, _, _, _), _, _)) =>
+            val obj = resolveObject(value, objType, astField)
+            Map(astField.name -> obj)
+          case None =>
+            Map.empty
+        }
+      case unsupported =>
+        ???
+    }
+  }
 
-    def lookupByTypeAndId(tpe: String, id: String): Option[Map[String, Any]] = {
-      (id, tpe) match {
-        case ("1000", "hero") => Some(Map("id" -> "1000", "name" -> "BB8"))
-        case ("1001", "hero") => Some(Map("id" -> "1001", "name" -> "R2D2"))
-        case ("1003", "hero") => Some(Map("id" -> "1002", "name" -> "C3P0"))
-        case _ => None
+  def resolveObject(id: String, objectType: ObjectType[_, _], astField: AstField): Map[String, Any] = {
+    val selectedFields: Vector[String] = astField.selections.map { case f: AstField => f.name }
+    lookupByTypeAndId(objectType.name, id) match {
+      case Some(obj) =>
+        obj.filterKeys(k => selectedFields.contains(k)).map { obj => }
+        val objFields = astField.selections.map {
+          case selectedField: AstField =>
+            val schemaField = objectType.fields.find(_.name == selectedField.name).get
+            resolveField(selectedField, schemaField, obj)
+        }.foldLeft(Map.empty[String, Any])((coll, map) => coll ++ map)
+        objFields
+      case None => Map.empty
+    }
+  }
+
+  def execute(qAst: AstDocument): JsValue = {
+    import spray.json._
+    import DefaultJsonProtocol._
+
+    val queryFieldName = ast.definitions.collect {
+      case ObjectTypeDefinition("Query", _, fields, _, _, _, _, _) =>
+        fields.head.name
+    }.head
+
+    val values = AstVisitor.visitAstWithState(schema, qAst, mutable.Map.empty[String, Any]) { (typeInfo, state) ⇒
+      AstVisitor.simple {
+        case f: AstField if typeInfo.fieldDef.isDefined && f.name == queryFieldName =>
+          val fieldType = typeInfo.fieldDef.get
+          state("data") = resolveField(f, fieldType, Map.empty)
       }
     }
-
-    def loadObjectByIdDeferred[T](tpe: TypeDefinition, field: FieldDefinition, args: Map[String, Any]): DeferredValue[T, Map[String, Any]] = {
-      DeferredValue[T, Map[String, Any]](DeferredObject(id = args("id").toString, fieldName = field.name, fieldType = field.fieldType))
-    }
+    values.toMap.toJson
   }
-
-
-  class GenericDeferredResolver extends DeferredResolver[MyRepo] {
-    override def resolve(deferred: Vector[Deferred[Any]], ctx: MyRepo, queryState: Any)(implicit ec: ExecutionContext): Vector[Future[Any]] = {
-      deferred.map {
-        case DeferredString(value) =>
-          Future.successful(value)
-        case DeferredObject(id, name, tpe) =>
-          val data = ctx.lookupByTypeAndId(name, id).get
-          Future.successful(data)
-      }
-    }
-  }
-
-  // Builder-based resolvers
-  lazy val genericResolver: FieldResolver[MyRepo] = FieldResolver[MyRepo](
-    resolve = {
-      case (tpe, field) => ctx =>
-        if (ctx.args.raw.nonEmpty) {
-          ctx.ctx.loadObjectByIdDeferred(tpe, field, ctx.args.raw)
-        }
-        else {
-          ctx.value.asInstanceOf[Map[String, Any]](field.name)
-        }
-    })
-
-  lazy val builder = AstSchemaBuilder.resolverBased[MyRepo](
-    InstanceCheck.field[MyRepo, JsValue],
-    genericResolver,
-    FieldResolver.defaultInput[MyRepo, JsValue])
-  lazy val schema: Schema[MyRepo, Any] = Schema.buildFromAst[MyRepo](ast, builder.validateSchemaWithException(ast))
-
-  def execute(qAst: Document, variables: JsValue) = {
-    import sangria.marshalling.sprayJson._
-    Executor.execute(
-      schema = schema, queryAst = qAst, userContext = new MyRepo, root = JsObject(), variables = variables, deferredResolver = new GenericDeferredResolver)
-  }
-
 }

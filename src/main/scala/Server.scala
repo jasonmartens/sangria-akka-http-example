@@ -23,29 +23,11 @@ object Server extends App {
     (post & path("graphql")) {
       entity(as[JsValue]) { requestJson ⇒
         val JsObject(fields) = requestJson
-
         val JsString(query) = fields("query")
-
-        val operation = fields.get("operationName") collect {
-          case JsString(op) ⇒ op
-        }
-
-        val vars = fields.get("variables") match {
-          case Some(obj: JsObject) ⇒ obj
-          case _ ⇒ JsObject.empty
-        }
-
         QueryParser.parse(query) match {
 
           // query parsed successfully, time to execute it!
-          case Success(qAst) ⇒
-            complete(
-              SchemaDefinition.execute(qAst, vars)
-              .map(OK → _)
-              .recover {
-                case error: QueryAnalysisError ⇒ BadRequest → error.resolveError
-                case error: ErrorWithResolver ⇒ InternalServerError → error.resolveError
-              })
+          case Success(qAst) ⇒ complete(SchemaDefinition.execute(qAst))
 
           // can't parse GraphQL query, return error
           case Failure(error) ⇒
