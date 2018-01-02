@@ -17,23 +17,32 @@ object Server extends App {
   implicit lazy val system = ActorSystem("sangria-server")
   implicit lazy val materializer = ActorMaterializer()
 
-  import system.dispatcher
-
   lazy val route: Route =
     (post & path("graphql")) {
-      entity(as[JsValue]) { requestJson ⇒
-        val JsObject(fields) = requestJson
-        val JsString(query) = fields("query")
-        QueryParser.parse(query) match {
+      entity(as[String]) { requestJson ⇒
+        // application/graphql
+         QueryParser.parse(requestJson) match {
+             // query parsed successfully, time to execute it!
+             case Success(qAst) ⇒ complete(SchemaDefinition.execute(qAst))
 
-          // query parsed successfully, time to execute it!
-          case Success(qAst) ⇒ complete(SchemaDefinition.execute(qAst))
-
-          // can't parse GraphQL query, return error
-          case Failure(error) ⇒
-            complete(BadRequest, JsObject("error" → JsString(error.getMessage)))
-        }
-      }
+             // can't parse GraphQL query, return error
+             case Failure(error) ⇒
+               complete(BadRequest, JsObject("error" → JsString(error.getMessage)))
+           }
+         }
+      // TODO: Make application/json work - http://graphql.org/learn/serving-over-http/
+//        val JsObject(fields) = requestJson.parseJson
+//        val JsString(query) = if (fields.contains("query")) fields("query") else fields("mutation")
+//        QueryParser.parse(query) match {
+//
+//          // query parsed successfully, time to execute it!
+//          case Success(qAst) ⇒ complete(SchemaDefinition.execute(qAst))
+//
+//          // can't parse GraphQL query, return error
+//          case Failure(error) ⇒
+//            complete(BadRequest, JsObject("error" → JsString(error.getMessage)))
+//        }
+//      }
     } ~
     get {
       getFromResource("graphiql.html")
