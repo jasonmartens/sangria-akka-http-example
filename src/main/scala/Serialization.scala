@@ -1,3 +1,7 @@
+
+/**
+  * Methods to serialize/deserialize data
+  */
 object Serialization {
   import spray.json._
   implicit object AnyJsonFormat extends JsonFormat[Any] {

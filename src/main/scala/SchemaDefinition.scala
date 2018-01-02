@@ -9,8 +9,6 @@ import sangria.parser.QueryParser
 import sangria.schema._
 import sangria.validation.QueryValidator
 
-import scala.collection.mutable
-
 /**
   * Defines a GraphQL schema for the current project
   */
@@ -52,14 +50,7 @@ object SchemaDefinition {
     """.stripMargin
   lazy val ast = QueryParser.parse(sdlSchemaString).get
   lazy val schema = Schema.buildFromAst(ast)
-  lazy val data: mutable.Map[(String, String), Map[String, Any]] = mutable.Map(
-    ("1000", "Droid") -> Map("id" -> "1000", "name" -> "BB8", "friends" -> Vector("1001", "1002")),
-    ("1001", "Droid") -> Map("id" -> "1001", "name" -> "R2D2", "friends" -> Vector("1000")),
-    ("1002", "Droid") -> Map("id" -> "1002", "name" -> "C3P0"))
 
-  def lookupByTypeAndId(tpe: String, id: String): Option[Map[String, Any]] = {
-    data.get((id, tpe))
-  }
 
   def resolveField(astField: AstField, outputType: OutputType[_], obj: Map[String, Any]): Map[String, Any] = {
     outputType match {
@@ -88,7 +79,7 @@ object SchemaDefinition {
 
   def resolveObject(id: String, objectType: ObjectType[_, _], selections: Vector[AstSelection]): Map[String, Any] = {
     val selectedFields: Vector[String] = selections.map { case f: AstField => f.name }
-    lookupByTypeAndId(objectType.name, id) match {
+    Data.lookupByTypeAndId(objectType.name, id) match {
       case Some(obj) =>
         obj.filterKeys(k => selectedFields.contains(k)).map { obj => }
         val objFields = selections.map {
@@ -120,7 +111,7 @@ object SchemaDefinition {
     val id = UUID.randomUUID().toString
     val objTypeName = outputType match { case OptionType(ObjectType(objName, _, _, _, _, _)) => objName}
     val newObject: Map[String, Any] = objValue.fields.foldLeft(Map[String, Any]("id"-> id))((coll, field) => coll ++ Map(field.name -> resolveInputField(field.value)))
-    data((id, objTypeName)) = newObject
+    Data.addObject(id, objTypeName, newObject)
 
     val selectedFields: Vector[String] = selections.collect{case f: AstField => f.name}
     val returnObject = newObject.filterKeys(key => selectedFields.contains(key))
