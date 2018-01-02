@@ -5,17 +5,16 @@ import akka.http.scaladsl.model.StatusCodes._
 import akka.http.scaladsl.server._
 import akka.stream.ActorMaterializer
 import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
-import sangria.execution.deferred.DeferredResolver
 import sangria.parser.QueryParser
-import sangria.execution.{ErrorWithResolver, Executor, QueryAnalysisError}
-import sangria.marshalling.sprayJson._
 import spray.json._
-
+import DefaultJsonProtocol._
+import Serialization._
 import scala.util.{Failure, Success}
 
 object Server extends App {
   implicit lazy val system = ActorSystem("sangria-server")
   implicit lazy val materializer = ActorMaterializer()
+
 
   lazy val route: Route =
     (post & path("graphql")) {
@@ -23,7 +22,7 @@ object Server extends App {
         // application/graphql
          QueryParser.parse(requestJson) match {
              // query parsed successfully, time to execute it!
-             case Success(qAst) ⇒ complete(SchemaDefinition.execute(qAst))
+             case Success(qAst) ⇒ complete(SchemaDefinition.execute(qAst).toJson)
 
              // can't parse GraphQL query, return error
              case Failure(error) ⇒
