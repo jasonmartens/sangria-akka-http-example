@@ -17,7 +17,7 @@ class RouteSpec extends WordSpec with Matchers with ScalatestRouteTest with Spra
   "The service" should {
     "respond to GraphQL queries" in {
       val query = graphql"""{ hero(id: "1000") { id, name } }"""
-      val entity = HttpEntity(contentType = ContentTypes.`application/json`, s"""${query.renderCompact}""")
+      val entity = HttpEntity(contentType = ContentTypes.`application/json`, s"""{"query": "${query.renderCompact.replaceAll("\\\"", "\\\\\"")}" } """)
 
       Post("/graphql", entity) ~> Server.route ~> check {
         response.status shouldBe StatusCodes.OK
@@ -28,7 +28,7 @@ class RouteSpec extends WordSpec with Matchers with ScalatestRouteTest with Spra
 
     "respond to queries with recursive field types" in {
       val query = graphql"""{ hero(id: "1000") { id name friends {id name} } }"""
-      val entity = HttpEntity(contentType = ContentTypes.`application/json`, s"""${query.renderPretty}""")
+      val entity = HttpEntity(contentType = ContentTypes.`application/json`, s"""{"query": "${query.renderCompact.replaceAll("\\\"", "\\\\\"")}" } """)
 
       Post("/graphql", entity) ~> Server.route ~> check {
         response.status shouldBe StatusCodes.OK
@@ -39,7 +39,7 @@ class RouteSpec extends WordSpec with Matchers with ScalatestRouteTest with Spra
 
     "create new objects" in {
       val query = graphql"""mutation { createDroid(droid: {name: "BB9" friends: ["1000"] } ) { id name friends {id name} } }"""
-      val entity = HttpEntity(contentType = ContentTypes.`application/json`, s"""${query.renderPretty}""")
+      val entity = HttpEntity(contentType = ContentTypes.`application/json`, s"""{"query": "${query.renderCompact.replaceAll("\\\"", "\\\\\"")}" } """)
 
       Post("/graphql", entity) ~> Server.route ~> check {
         response.status shouldBe StatusCodes.OK

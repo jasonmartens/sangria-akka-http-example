@@ -3,11 +3,15 @@ import java.util.UUID
 import sangria.ast.{AstVisitor, ObjectTypeDefinition, Argument => AstArgument, Document => AstDocument, Field => AstField}
 import sangria.ast.{FieldDefinition => AstFieldDefinition, OperationDefinition => AstOperationDefinition}
 import sangria.ast.{OperationType => AstOperationType, Selection => AstSelection, StringValue => AstStringValue}
-import sangria.ast.{TypeDefinition => AstTypeDefinition, Value => AstValue, ObjectValue => AstObjectValue}
-import sangria.ast.{ObjectField => AstObjectField, ListValue => AstListValue, NameValue => AstNameValue, ScalarValue => AstScalarValue}
+import sangria.ast.{ObjectValue => AstObjectValue, TypeDefinition => AstTypeDefinition, Value => AstValue}
+import sangria.ast.{ListValue => AstListValue, NameValue => AstNameValue, ObjectField => AstObjectField, ScalarValue => AstScalarValue}
+import sangria.execution.Executor
 import sangria.parser.QueryParser
 import sangria.schema._
 import sangria.validation.QueryValidator
+
+import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.duration._
 
 /**
   * Defines a GraphQL schema for the current project
@@ -123,7 +127,7 @@ object SchemaDefinition {
     resolveField(field, outputType, Map.empty)
   }
 
-  def executeMutation(schema: Schema[_, _], fieldName: String, argName: String, argValue: AstValue, selections: Vector[AstSelection]): Map[String, Any] = {
+  def executeMutation(schema: Schema[_, _], fieldName: String, argName: String, argValue: AstValue, selections: Vector[AstSelection]): Any = {
     val outputType = schema.mutation.map(m => m.fieldsByName(fieldName).head.fieldType).get
     val inputTypes: InputType[_] = schema.mutation
       .flatMap(
@@ -142,7 +146,7 @@ object SchemaDefinition {
     }
   }
 
-  def execute(qAst: AstDocument): Map[String, Any] = {
+  def execute(qAst: AstDocument)(implicit ec: ExecutionContext): Future[Any] = {
 
     val violations = QueryValidator.default.validateQuery(schema, qAst)
     if (violations.nonEmpty) {
@@ -151,9 +155,11 @@ object SchemaDefinition {
 
     val result = qAst match {
       case AstDocument(Vector(AstOperationDefinition(AstOperationType.Query, _, _, _, Vector(field @ AstField(_, _, _, _, _, _, _, _)), _, _, _)), _, _, _) =>
-        Map("data" -> executeQuery(schema, field))
+        Future.successful(Map("data" -> executeQuery(schema, field)))
       case AstDocument(Vector(AstOperationDefinition(AstOperationType.Mutation, _, _, _, Vector(AstField(_, fieldName, Vector(AstArgument(argName, argValue, _, _)), _, selections, _, _, _)), _, _, _)), _, _, _) =>
-        Map("data" -> executeMutation(schema, fieldName, argName, argValue, selections))
+        Future.successful(Map("data" -> executeMutation(schema, fieldName, argName, argValue, selections)))
+      case _ =>
+        Executor.execute(schema, qAst)
     }
 
     result

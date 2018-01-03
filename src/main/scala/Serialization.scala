@@ -16,6 +16,7 @@ object Serialization {
       case b: Boolean if b == false => JsFalse
       case o: Some[Any] => o.get.toJson
       case None => JsNull
+      case null => JsNull
     }
 
     def read(value: JsValue) = value match {
