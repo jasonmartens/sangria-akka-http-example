@@ -64,7 +64,7 @@ object SchemaDefinition {
       case ScalarType("String", _, _, _, _, _, _, _) =>
         Map(astField.name -> obj(astField.name))
       case ListType(objType @ ObjectType(_, _, _, _, _, _)) =>
-        val objectIDs = obj(astField.name).asInstanceOf[Vector[String]]
+        val objectIDs = obj.getOrElse(astField.name, Vector()).asInstanceOf[Vector[String]]
         val objects = objectIDs.map { id =>
           resolveObject(id, objType, astField.selections)
         }
