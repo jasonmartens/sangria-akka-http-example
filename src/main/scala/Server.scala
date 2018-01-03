@@ -7,9 +7,11 @@ import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server._
 import akka.stream.ActorMaterializer
 import sangria.parser.QueryParser
+import sangria.schema.Schema
 import spray.json.DefaultJsonProtocol._
 import spray.json._
 
+import scala.collection.mutable
 import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success}
 
@@ -17,6 +19,20 @@ object Server extends App {
   implicit lazy val system: ActorSystem = ActorSystem("sangria-server")
   implicit lazy val materializer: ActorMaterializer = ActorMaterializer()
   implicit lazy val ec: ExecutionContext = system.dispatcher
+
+  lazy val loadedSchemas: mutable.Map[String, Schema[Any, Any]] = mutable.Map.empty
+
+  def loadSchema(id: String, version: String): Schema[Any, Any] = {
+    if (loadedSchemas.contains(id)) {
+      loadedSchemas(id)
+    }
+    else {
+      val schemaString = Data.lookupByIdAndType("1", "Schema").get("1").asInstanceOf[String]
+      val schema = SchemaDefinition.generateSchema(schemaString)
+      loadedSchemas(id) = schema
+      schema
+    }
+  }
 
   lazy val route: Route =
     (post & path("graphql")) {
@@ -26,7 +42,8 @@ object Server extends App {
         val JsString(query) = fields("query")
         QueryParser.parse(query) match {
           // query parsed successfully, time to execute it!
-          case Success(qAst) ⇒ complete(SchemaDefinition.execute(qAst).map(_.toJson))
+          case Success(qAst) ⇒
+            complete(SchemaDefinition.execute(qAst, loadSchema("1", "1")).map(_.toJson))
 
           // can't parse GraphQL query, return error
           case Failure(error) ⇒

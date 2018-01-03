@@ -17,45 +17,9 @@ import scala.concurrent.{ExecutionContext, Future}
   */
 object SchemaDefinition {
 
-  lazy val sdlSchemaString =
-    """
-      |
-      | type Droid {
-      |  "The ID of the droid"
-      |  id: ID!
-      |  "How we refer to the droid in the movies"
-      |  name: String!
-      |  friends: [Droid!]!
-      |}
-      |
-      | input NewDroid {
-      |   name: String!
-      |   friends: [ID!]!
-      | }
-      |
-      | input UpdateDroid {
-      |   id: ID!
-      |   name: String
-      |   @append friends: [ID]
-      | }
-      |
-      | type Query {
-      |   hero(id: ID!): Droid
-      | }
-      |
-      | type Mutation {
-      |   createDroid(droid: NewDroid!): Droid
-      |   modifyDroid(droid: UpdateDroid!): Droid
-      | }
-      |
-      | schema {
-      |   query: Query
-      |   mutation: Mutation
-      | }
-    """.stripMargin
-  lazy val ast = QueryParser.parse(sdlSchemaString).get
-  lazy val schema = Schema.buildFromAst(ast)
-
+  def generateSchema(schemaSDL: String): Schema[Any, Any] = {
+    Schema.buildFromAst(QueryParser.parse(schemaSDL).get)
+  }
 
   def resolveField(astField: AstField, outputType: OutputType[_], obj: Map[String, Any]): Map[String, Any] = {
     outputType match {
@@ -84,7 +48,7 @@ object SchemaDefinition {
 
   def resolveObject(id: String, objectType: ObjectType[_, _], selections: Vector[AstSelection]): Map[String, Any] = {
     val selectedFields: Vector[String] = selections.map { case f: AstField => f.name }
-    Data.lookupByTypeAndId(objectType.name, id) match {
+    Data.lookupByIdAndType(id, objectType.name) match {
       case Some(obj) =>
         obj.filterKeys(k => selectedFields.contains(k)).map { obj => }
         val objFields = selections.map {
@@ -147,8 +111,7 @@ object SchemaDefinition {
     }
   }
 
-  def execute(qAst: AstDocument)(implicit ec: ExecutionContext): Future[Any] = {
-
+  def execute(qAst: AstDocument, schema: Schema[Any, Any])(implicit ec: ExecutionContext): Future[Any] = {
     val violations = QueryValidator.default.validateQuery(schema, qAst)
     if (violations.nonEmpty) {
       throw new RuntimeException(s"Query failed validation: $violations")
