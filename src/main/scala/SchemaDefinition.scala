@@ -10,8 +10,7 @@ import sangria.parser.QueryParser
 import sangria.schema._
 import sangria.validation.QueryValidator
 
-import scala.concurrent.{Await, ExecutionContext, Future}
-import scala.concurrent.duration._
+import scala.concurrent.{ExecutionContext, Future}
 
 /**
   * Defines a GraphQL schema for the current project
@@ -22,7 +21,9 @@ object SchemaDefinition {
     """
       |
       | type Droid {
+      |  "The ID of the droid"
       |  id: ID!
+      |  "How we refer to the droid in the movies"
       |  name: String!
       |  friends: [Droid!]!
       |}
@@ -70,7 +71,7 @@ object SchemaDefinition {
         Map(astField.name -> objects)
       case OptionType(objType@ObjectType(objName, _, _, _, _, _)) =>
         astField.arguments.find(_.name == "id") match {
-          case Some(AstArgument(_, AstStringValue(value, _, _), _, _)) =>
+          case Some(AstArgument(_, AstStringValue(value, _, _, _, _), _, _)) =>
             val obj = resolveObject(value, objType, astField.selections)
             Map(astField.name -> obj)
           case None =>
@@ -102,7 +103,7 @@ object SchemaDefinition {
         fields.foldLeft(Map.empty[String, Any])((coll, f) => coll ++ Map(f.name -> resolveInputField(f.value)))
       case objField: AstObjectField =>
         Map(objField.name -> resolveInputField(objField.value))
-      case AstStringValue(v, _, _) =>
+      case AstStringValue(v, _, _, _, _) =>
         v
       case AstListValue(vs, _, _) =>
         vs.map(resolveInputField)
