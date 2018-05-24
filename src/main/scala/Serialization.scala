@@ -12,11 +12,12 @@ object Serialization {
       case v: Vector[Any] => JsArray(v.map(_.toJson))
       case n: Int => JsNumber(n)
       case s: String => JsString(s)
-      case b: Boolean if b == true => JsTrue
-      case b: Boolean if b == false => JsFalse
+      case b: Boolean if b => JsTrue
+      case b: Boolean if !b => JsFalse
       case o: Some[Any] => o.get.toJson
       case None => JsNull
       case null => JsNull
+      case _ => ???
     }
 
     def read(value: JsValue) = value match {
@@ -24,6 +25,7 @@ object Serialization {
       case JsString(s) => s
       case JsTrue => true
       case JsFalse => false
+      case _ => ???
     }
   }
 }

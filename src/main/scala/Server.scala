@@ -57,6 +57,6 @@ object Server extends App {
       getFromResource("graphiql.html")
     }
 
-  println("Listening on 0.0.0.0:8080")
-  Http().bindAndHandle(route, "0.0.0.0", sys.props.get("http.port").fold(8080)(_.toInt))
+  println("Listening on 0.0.0.0:8081")
+  Http().bindAndHandle(route, "0.0.0.0", sys.props.get("http.port").fold(8081)(_.toInt))
 }

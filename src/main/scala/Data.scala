@@ -59,14 +59,36 @@ object Data {
 
   def lookupByIdAndType(id: String, tpe: String): Option[Map[String, Any]] = {
     val lookupKey = Key(id, tpe)
-    val d = eventStream.filter(e => e.key == lookupKey).foldLeft(Map.empty[String, Any]){
-      case (coll, Create(_, d)) => coll ++ d
-      case (coll, Replace(_, d)) => coll ++ d
-    }
-    if (d.isEmpty) None else Some(d)
+    val d = collapseEvents(eventStream.filter(e => e.key == lookupKey).toList)
+    if (d.isEmpty) None else Some(d(lookupKey))
+  }
+
+  def collapseEvents(events: List[Event]): Map[Key, Map[String, Any]] = {
+    events.groupBy(_.key)
+      .map{case (key, keyEvents) =>
+        val keyMap: Map[String, Any] = keyEvents.foldLeft(Map.empty[String, Any]){
+          case (coll, Create(_, d)) => coll ++ d
+          case (coll, Replace(_, d)) => coll ++ d}
+        (key, keyMap)}
   }
 
   def addObject(id: String, typeName: String, newObject: Map[String, Any]): Unit = {
     eventStream += Create(Key(id, typeName), newObject)
+  }
+
+  /**
+    * For a given referenceFieldName, find all the entries containing id and return a list of the object keys
+    * @param id The referenced ID to lookup
+    * @param referenceFieldName The name of the field containing references. Must be a Vector[String]
+    * @return A Vector of Keys where referenceFieldName contains ID
+    */
+  def lookupReferences(id: String, referenceFieldName: String): Vector[Key] = {
+    collapseEvents(eventStream.toList).collect{ case (key, data) =>
+      data.get(referenceFieldName)
+        .map(x => x.asInstanceOf[Vector[String]].contains(id)) match {
+          case Some(true) => key
+          case _ => ???
+        }
+    }.toVector
   }
 }

@@ -23,23 +23,24 @@ object SchemaDefinition {
 
   def resolveField(astField: AstField, outputType: OutputType[_], obj: Map[String, Any]): Map[String, Any] = {
     outputType match {
-      case ScalarType("ID", _, _, _, _, _, _, _) =>
+      case ScalarType("ID", _, _, _, _, _, _, _, _) =>
         Map(astField.name -> obj(astField.name))
-      case ScalarType("String", _, _, _, _, _, _, _) =>
+      case ScalarType("String", _, _, _, _, _, _, _, _) =>
         Map(astField.name -> obj(astField.name))
-      case ListType(objType @ ObjectType(_, _, _, _, _, _)) =>
+      case ListType(objType @ ObjectType(_, _, _, _, _, _, _)) =>
         val objectIDs = obj.getOrElse(astField.name, Vector()).asInstanceOf[Vector[String]]
         val objects = objectIDs.map { id =>
           resolveObject(id, objType, astField.selections)
         }
         Map(astField.name -> objects)
-      case OptionType(objType@ObjectType(objName, _, _, _, _, _)) =>
+      case OptionType(objType@ObjectType(objName, _, _, _, _, _, _)) =>
         astField.arguments.find(_.name == "id") match {
           case Some(AstArgument(_, AstStringValue(value, _, _, _, _), _, _)) =>
             val obj = resolveObject(value, objType, astField.selections)
             Map(astField.name -> obj)
           case None =>
             Map.empty
+          case x => throw new NotImplementedError(s"$x is not implemented")
         }
       case unsupported =>
         ???
@@ -47,7 +48,10 @@ object SchemaDefinition {
   }
 
   def resolveObject(id: String, objectType: ObjectType[_, _], selections: Vector[AstSelection]): Map[String, Any] = {
-    val selectedFields: Vector[String] = selections.map { case f: AstField => f.name }
+    val selectedFields: Vector[String] = selections.map {
+      case f: AstField => f.name
+      case _ => ???
+    }
     Data.lookupByIdAndType(id, objectType.name) match {
       case Some(obj) =>
         obj.filterKeys(k => selectedFields.contains(k)).map { obj => }
@@ -55,9 +59,11 @@ object SchemaDefinition {
           case selectedField: AstField =>
             val schemaField = objectType.fields.find(_.name == selectedField.name).get
             resolveField(selectedField, schemaField.fieldType, obj)
+          case _ => ???
         }.foldLeft(Map.empty[String, Any])((coll, map) => coll ++ map)
         objFields
       case None => Map.empty
+      case _ => ???
     }
   }
 
@@ -78,7 +84,10 @@ object SchemaDefinition {
 
   def createObject(objValue: AstObjectValue, outputType: OutputType[_], inputType: InputType[_], selections: Vector[AstSelection]): Option[Map[String, Any]] = {
     val id = UUID.randomUUID().toString
-    val objTypeName = outputType match { case OptionType(ObjectType(objName, _, _, _, _, _)) => objName}
+    val objTypeName = outputType match {
+      case OptionType(ObjectType(objName, _, _, _, _, _, _)) => objName
+      case _ => ???
+    }
     val newObject: Map[String, Any] = objValue.fields.foldLeft(Map[String, Any]("id"-> id))((coll, field) => coll ++ Map(field.name -> resolveInputField(field.value)))
     Data.addObject(id, objTypeName, newObject)
 
@@ -98,7 +107,7 @@ object SchemaDefinition {
       .flatMap(
         m => m.fieldsByName(fieldName).head
           .arguments.find(_.name == argName)
-          .map { case Argument(_, it, _, _, _, _) => it }
+          .map { case Argument(_, it, _, _, _, _, _) => it }
       ).get
     argValue match {
       case objValue: AstObjectValue =>
