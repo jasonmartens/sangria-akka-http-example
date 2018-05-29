@@ -1,10 +1,6 @@
 import java.util.UUID
 
-import sangria.ast.{AstVisitor, ObjectTypeDefinition, Argument => AstArgument, Document => AstDocument, Field => AstField}
-import sangria.ast.{FieldDefinition => AstFieldDefinition, OperationDefinition => AstOperationDefinition}
-import sangria.ast.{OperationType => AstOperationType, Selection => AstSelection, StringValue => AstStringValue}
-import sangria.ast.{ObjectValue => AstObjectValue, TypeDefinition => AstTypeDefinition, Value => AstValue}
-import sangria.ast.{ListValue => AstListValue, NameValue => AstNameValue, ObjectField => AstObjectField, ScalarValue => AstScalarValue}
+import sangria.ast.{AstVisitor, BigIntValue, ObjectTypeDefinition, Argument => AstArgument, Document => AstDocument, Field => AstField, FieldDefinition => AstFieldDefinition, ListValue => AstListValue, NameValue => AstNameValue, ObjectField => AstObjectField, ObjectValue => AstObjectValue, OperationDefinition => AstOperationDefinition, OperationType => AstOperationType, ScalarValue => AstScalarValue, Selection => AstSelection, StringValue => AstStringValue, TypeDefinition => AstTypeDefinition, Value => AstValue}
 import sangria.execution.Executor
 import sangria.parser.QueryParser
 import sangria.schema._
@@ -34,7 +30,11 @@ object SchemaDefinition {
         }
         Map(astField.name -> objects)
       case OptionType(objType@ObjectType(objName, _, _, _, _, _, _)) =>
-        astField.arguments.find(_.name == "id") match {
+        val idField = astField.arguments.find(_.name == "id")
+        idField match {
+          case Some(AstArgument(_, BigIntValue(intVal, _, _), _, _)) =>
+            val obj = resolveObject(intVal.toString(), objType, astField.selections)
+            Map(astField.name -> obj)
           case Some(AstArgument(_, AstStringValue(value, _, _, _, _), _, _)) =>
             val obj = resolveObject(value, objType, astField.selections)
             Map(astField.name -> obj)
