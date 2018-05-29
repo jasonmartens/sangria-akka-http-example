@@ -50,10 +50,14 @@ object Data {
 
   // Mock event stream with initial data
   val eventStream: mutable.ListBuffer[Event] = mutable.ListBuffer(
-    Create(  Key("1000", "Droid"), Map("id" -> "1000", "name" -> "BB8")),
-    Replace( Key("1000", "Droid"), Map("friends" -> Vector("1001", "1002"))),
-    Create(  Key("1001", "Droid"), Map("id" -> "1001", "name" -> "R2D2", "friends" -> Vector("1000"))),
-    Create(  Key("1002", "Droid"), Map("id" -> "1002", "name" -> "C3P0")),
+    Create(  Key("A1A47BCE-155E-4567-8926-0F4954AE1E1B", "Droid"),
+      Map("id" -> "A1A47BCE-155E-4567-8926-0F4954AE1E1B", "name" -> "BB8")),
+    Replace( Key("1000", "Droid"),
+      Map("friends" -> Vector("58BB2C53-F04E-4C02-BA2D-27C3173A833A", "1002"))),
+    Create(  Key("58BB2C53-F04E-4C02-BA2D-27C3173A833A", "Droid"),
+      Map("id" -> "58BB2C53-F04E-4C02-BA2D-27C3173A833A", "name" -> "R2D2", "friends" -> Vector("A1A47BCE-155E-4567-8926-0F4954AE1E1B"))),
+    Create(  Key("575FE965-9848-462A-B797-373C7AF460AA", "Droid"),
+      Map("id" -> "575FE965-9848-462A-B797-373C7AF460AA", "name" -> "C3P0")),
     Create(  Key("1", "Schema"),   Map("1" -> defaultSchema))
   )
 
