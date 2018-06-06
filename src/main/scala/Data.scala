@@ -52,8 +52,8 @@ object Data {
   val eventStream: mutable.ListBuffer[Event] = mutable.ListBuffer(
     Create(  Key("A1A47BCE-155E-4567-8926-0F4954AE1E1B", "Droid"),
       Map("id" -> "A1A47BCE-155E-4567-8926-0F4954AE1E1B", "name" -> "BB8")),
-    Replace( Key("1000", "Droid"),
-      Map("friends" -> Vector("58BB2C53-F04E-4C02-BA2D-27C3173A833A", "1002"))),
+    Replace( Key("A1A47BCE-155E-4567-8926-0F4954AE1E1B", "Droid"),
+      Map("friends" -> Vector("58BB2C53-F04E-4C02-BA2D-27C3173A833A", "575FE965-9848-462A-B797-373C7AF460AA"))),
     Create(  Key("58BB2C53-F04E-4C02-BA2D-27C3173A833A", "Droid"),
       Map("id" -> "58BB2C53-F04E-4C02-BA2D-27C3173A833A", "name" -> "R2D2", "friends" -> Vector("A1A47BCE-155E-4567-8926-0F4954AE1E1B"))),
     Create(  Key("575FE965-9848-462A-B797-373C7AF460AA", "Droid"),
