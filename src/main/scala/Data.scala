@@ -30,7 +30,7 @@ object Data {
       | input UpdateDroid {
       |   id: ID!
       |   name: String
-      |   @append friends: [ID]
+      |   friends: [ID]
       | }
       |
       | type Query {
@@ -76,8 +76,9 @@ object Data {
         (key, keyMap)}
   }
 
-  def addObject(id: String, typeName: String, newObject: Map[String, Any]): Unit = {
+  def addObject(id: String, typeName: String, newObject: Map[String, Any]): Map[String, Any] = {
     eventStream += Create(Key(id, typeName), newObject)
+    newObject + ("id" -> id)
   }
 
   /**
