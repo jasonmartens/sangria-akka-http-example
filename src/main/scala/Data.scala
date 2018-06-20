@@ -14,7 +14,12 @@ object Data {
 
   private val defaultSchema = """
       |
-      | type Droid {
+      | interface Character {
+      |   id: ID!
+      |   name: String!
+      | }
+      |
+      | type Droid implements Character {
       |  "The ID of the droid"
       |  id: ID!
       |  "How we refer to the droid in the movies"
@@ -48,6 +53,19 @@ object Data {
       | }
     """.stripMargin
 
+  private val extensionSchema =
+    """
+      | type Jedi implements Character {
+      |   id: ID!
+      |   name: String!
+      |   powers: [String!]!
+      | }
+      |
+      | type Query {
+      |   jedi(id: ID!): Jedi
+      | }
+    """.stripMargin
+
   // Mock event stream with initial data
   val eventStream: mutable.ListBuffer[Event] = mutable.ListBuffer(
     Create(  Key("A1A47BCE-155E-4567-8926-0F4954AE1E1B", "Droid"),
@@ -55,13 +73,17 @@ object Data {
     Replace( Key("A1A47BCE-155E-4567-8926-0F4954AE1E1B", "Droid"),
       Map("friends" -> Vector("58BB2C53-F04E-4C02-BA2D-27C3173A833A", "575FE965-9848-462A-B797-373C7AF460AA"))),
     Create(  Key("58BB2C53-F04E-4C02-BA2D-27C3173A833A", "Droid"),
-      Map("id" -> "58BB2C53-F04E-4C02-BA2D-27C3173A833A", "name" -> "R2D2", "friends" -> Vector("A1A47BCE-155E-4567-8926-0F4954AE1E1B"))),
+      Map("id" -> "58BB2C53-F04E-4C02-BA2D-27C3173A833A", "name" -> "R2D2",
+        "friends" -> Vector("A1A47BCE-155E-4567-8926-0F4954AE1E1B"))),
     Create(  Key("575FE965-9848-462A-B797-373C7AF460AA", "Droid"),
       Map("id" -> "575FE965-9848-462A-B797-373C7AF460AA", "name" -> "C3P0")),
-    Create(  Key("1", "Schema"),   Map("1" -> defaultSchema))
+    Create( Key("4B759874-C856-4576-BDE4-FB0EE013CBA4", "Jedi"),
+      Map("id" -> "4B759874-C856-4576-BDE4-FB0EE013CBA4", "name" -> "Luke Skywalker")),
+    Create(  Key("1", "Schema"),   Map("1" -> defaultSchema)),
+    Create(  Key("2", "Schema"),   Map("2" -> extensionSchema))
   )
 
-  def lookupByIdAndType(id: String, tpe: String): Option[Map[String, Any]] = {
+  def lookupByIdAndType(id: String, tpe: String, schemaSource: String): Option[Map[String, Any]] = {
     val lookupKey = Key(id, tpe)
     val d = collapseEvents(eventStream.filter(e => e.key == lookupKey).toList)
     if (d.isEmpty) None else Some(d(lookupKey))
@@ -76,7 +98,7 @@ object Data {
         (key, keyMap)}
   }
 
-  def addObject(id: String, typeName: String, newObject: Map[String, Any]): Map[String, Any] = {
+  def addObject(id: String, typeName: String, newObject: Map[String, Any], schemaSource: String): Map[String, Any] = {
     eventStream += Create(Key(id, typeName), newObject)
     newObject + ("id" -> id)
   }

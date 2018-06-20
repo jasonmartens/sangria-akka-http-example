@@ -16,7 +16,7 @@ import sangria.execution.deferred.{Deferred, DeferredResolver}
 import sangria.execution.{ErrorWithResolver, Executor, QueryAnalysisError}
 import sangria.marshalling.circe._
 import sangria.parser.DeliveryScheme.Try
-import sangria.parser.{QueryParser, SyntaxError}
+import sangria.parser.{AggregateSourceMapper, ParserConfig, QueryParser, SyntaxError}
 import sangria.schema.AstSchemaBuilder.TypeName
 import sangria.schema.{Action, AstSchemaBuilder, Context, FieldResolver, Schema}
 
@@ -52,8 +52,6 @@ object Server extends App {
             "column" → Json.fromBigInt(syntaxError.originalError.position.column))))))
     case NonFatal(e) ⇒
       formatError(e.getMessage)
-    case e ⇒
-      throw e
   }
 
   def formatError(message: String): Json =
@@ -63,21 +61,62 @@ object Server extends App {
     case (TypeName(name), field) ⇒ ctx => recursiveResolver(field, ctx)
   }
 
+  def stitchSchemas(documents: Traversable[Document]): Document = {
+    val originalSourceMappers = documents.flatMap(_.sourceMapper).toVector
+    val sourceMapper =
+      if (originalSourceMappers.nonEmpty) Some(AggregateSourceMapper.merge(originalSourceMappers))
+      else None
+
+    val otherDefinitions: Vector[Definition] = documents.flatMap(_.definitions).toVector.filter{
+      case ObjectTypeDefinition("Query", _, _, _, _, _, _, _) => false
+      case ObjectTypeDefinition("Mutation", _, _, _, _, _, _, _) => false
+      case SchemaDefinition(_, _, _, _, _) => false
+      case _ => true
+    }
+
+    val queryFields: Vector[FieldDefinition] = documents
+      .flatMap(_.definitions).toVector
+      .collect{ case ObjectTypeDefinition("Query", _, fields , _, _, _, _, _) => fields }
+      .flatten
+    val queryDefinition = ObjectTypeDefinition("Query", Vector.empty, queryFields)
+
+    val mutationFields: Vector[FieldDefinition] = documents
+      .flatMap(_.definitions).toVector
+      .collect{ case ObjectTypeDefinition("Mutation", _, fields , _, _, _, _, _) => fields }
+      .flatten
+    val mutationDefinition = ObjectTypeDefinition("Mutation", Vector.empty, mutationFields)
+
+    val operationTypes: Vector[OperationTypeDefinition] = documents
+      .flatMap(_.definitions)
+      .collect{ case SchemaDefinition(opTypes, _, _, _, _) => opTypes }
+      .flatten
+       // Only take one of each operation type
+      .groupBy(_.operation.toString).map{ case (_, ops) => ops.head}.toVector
+    val schemaDefinition = SchemaDefinition(operationTypes)
+
+
+    Document(otherDefinitions ++ Vector(queryDefinition, mutationDefinition, schemaDefinition), Vector.empty, None, sourceMapper)
+  }
+
   def buildSchema = {
-    val schemaString = Data.lookupByIdAndType("1", "Schema").get("1").asInstanceOf[String]
+    val schemaString = Data.lookupByIdAndType("1", "Schema", "").get("1").asInstanceOf[String]
+    val extensionSchemaString = Data.lookupByIdAndType("2", "Schema", "").get("2").asInstanceOf[String]
     val builder = AstSchemaBuilder.resolverBased(myResolver)
-    val schemaDoc = QueryParser.parse(schemaString).get
-    Schema.buildFromAst(schemaDoc, builder.validateSchemaWithException(schemaDoc))
+    val schemaDoc = QueryParser.parse(schemaString, config = ParserConfig(sourceIdFn = _ => "1")).get
+    val extensionDoc = QueryParser.parse(extensionSchemaString, config = ParserConfig(sourceIdFn = _ => "2")).get
+    val mergedDoc = stitchSchemas(Vector(schemaDoc, extensionDoc))
+    Schema.buildFromAst(mergedDoc, builder.validateSchemaWithException(mergedDoc))
   }
 
   class MyDeferredResolver extends DeferredResolver[Any] {
     def resolve(deferred: Vector[Deferred[Any]], ctx: Any, queryState: Any)(implicit ec: ExecutionContext) =
       deferred.map { d =>
-        Future.successful(d.asInstanceOf[DeferredMap].items.map(Data.lookupByIdAndType(_, "Droid")))
+        Future.successful(d.asInstanceOf[DeferredMap].items.map(item => Data.lookupByIdAndType(item.id, item.tpe, item.location)))
       }
   }
 
-  case class DeferredMap(items: Seq[String]) extends Deferred[Seq[Map[String, Any]]]
+  case class DeferredItem(id: String, tpe: String, location: String)
+  case class DeferredMap(items: Seq[DeferredItem]) extends Deferred[Seq[Map[String, Any]]]
 
   def recursiveResolver[Ctx](field: FieldDefinition, ctx: Context[Any, _]): Action[Ctx, Any] = {
     def fieldTypeResolver(ftype: ASTType): Action[Ctx, Any] = {
@@ -99,14 +138,15 @@ object Server extends App {
         case NamedType(tpeName, loc) =>
           ctx.query.operations.head._2.operationType match {
             case OperationType.Mutation =>
-              Data.addObject(UUID.randomUUID().toString, tpeName, ctx.args.arg(field.arguments.head.name))
+              Data.addObject(UUID.randomUUID().toString, tpeName, ctx.args.arg(field.arguments.head.name), loc.get.sourceId)
             case OperationType.Query =>
-              Data.lookupByIdAndType(ctx.args.arg(field.arguments.head.name).toString, tpeName)
+              Data.lookupByIdAndType(ctx.args.arg(field.arguments.head.name).toString, tpeName, loc.get.sourceId)
           }
         case NotNullType(subType, _) =>
           fieldTypeResolver(subType)
-        case ListType(subType, _) =>
+        case ListType(subType, loc) =>
           val listIDs = ctx.value.asInstanceOf[Map[String, Any]](field.name).asInstanceOf[Seq[String]]
+              .map(id => DeferredItem(id, subType.namedType.name, loc.get.sourceId))
           DeferredMap(listIDs)
         case bork =>
           println(s"got bork: $bork")
