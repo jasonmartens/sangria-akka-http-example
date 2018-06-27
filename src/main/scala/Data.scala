@@ -38,18 +38,18 @@ object Data {
       |   friends: [ID]
       | }
       |
-      | type Query {
+      | type HeroQuery {
       |   hero(id: ID!): Droid
       | }
       |
-      | type Mutation {
+      | type DroidMutations {
       |   createDroid(droid: NewDroid!): Droid
       |   modifyDroid(droid: UpdateDroid!): Droid
       | }
       |
       | schema {
-      |   query: Query
-      |   mutation: Mutation
+      |   query: HeroQuery
+      |   mutation: DroidMutations
       | }
     """.stripMargin
 
@@ -78,7 +78,8 @@ object Data {
     Create(  Key("575FE965-9848-462A-B797-373C7AF460AA", "Droid"),
       Map("id" -> "575FE965-9848-462A-B797-373C7AF460AA", "name" -> "C3P0")),
     Create( Key("4B759874-C856-4576-BDE4-FB0EE013CBA4", "Jedi"),
-      Map("id" -> "4B759874-C856-4576-BDE4-FB0EE013CBA4", "name" -> "Luke Skywalker")),
+      Map("id" -> "4B759874-C856-4576-BDE4-FB0EE013CBA4", "name" -> "Luke Skywalker",
+      "powers" -> Vector("Force Push", "Force Projection"))),
     Create(  Key("1", "Schema"),   Map("1" -> defaultSchema)),
     Create(  Key("2", "Schema"),   Map("2" -> extensionSchema))
   )

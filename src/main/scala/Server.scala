@@ -13,7 +13,7 @@ import io.circe.parser._
 import sangria.ast.OperationType
 import sangria.ast.{Document, Type => ASTType, _}
 import sangria.execution.deferred.{Deferred, DeferredResolver}
-import sangria.execution.{ErrorWithResolver, Executor, QueryAnalysisError}
+import sangria.execution.{ErrorWithResolver, Executor, MaterializedSchemaValidationError, QueryAnalysisError}
 import sangria.marshalling.circe._
 import sangria.parser.DeliveryScheme.Try
 import sangria.parser.{AggregateSourceMapper, ParserConfig, QueryParser, SyntaxError}
@@ -40,6 +40,7 @@ object Server extends App {
       .recover {
         case error: QueryAnalysisError ⇒ BadRequest → error.resolveError
         case error: ErrorWithResolver ⇒ InternalServerError → error.resolveError
+        case error: MaterializedSchemaValidationError => InternalServerError -> error.resolveError
       })
 
   def formatError(error: Throwable): Json = error match {
@@ -61,41 +62,84 @@ object Server extends App {
     case (TypeName(name), field) ⇒ ctx => recursiveResolver(field, ctx)
   }
 
+  /**
+    * Need to merge any definitions with a name of (Query|Mutation|Subscription),
+    * as well as any types defined as a (Query|Mutation|Subscription) in the schema {} section
+    * @return
+    */
+  def stitchOperation(definitions: Vector[Definition], stitchOpType: OperationType): Vector[Definition] = {
+    val stitchOpName = stitchOpType match {
+      case OperationType.Query => "Query"
+      case OperationType.Mutation => "Mutation"
+      case OperationType.Subscription => "Subscription"
+    }
+
+    // Fields from all definitions with a name of Query
+    val queryFields: Vector[FieldDefinition] = definitions.collect {
+      case ObjectTypeDefinition(opName, _, fields, _, _, _, _, _) if opName == stitchOpName => fields }.flatten
+
+    // All type definitions from the SchemaDefinition with an OperationTypeDefinition of stitchedOptType
+    val schemaObjectTypeNames = definitions
+      .collect { case SchemaDefinition(opTypes, _, _, _, _) => opTypes }
+      .flatten.collect { case OperationTypeDefinition(op, tpe, _, _) if op == stitchOpType => tpe.name }
+    // From all the NamedTypes in the SchemaDefinition for queries, get the fields
+    val schemaQueryTypesFields: Vector[FieldDefinition] = definitions
+      .collect {
+        case ObjectTypeDefinition(name, _, fields, _, _, _, _, _) if schemaObjectTypeNames.contains(name) => fields }
+      .flatten
+
+    val stitchedOperationObject = ObjectTypeDefinition(s"Stitched$stitchOpName", Vector.empty, schemaQueryTypesFields ++ queryFields)
+    val queryOpTypeDef = OperationTypeDefinition(stitchOpType, NamedType(s"Stitched$stitchOpName"))
+
+    // If there is nothing to stitch, then there are no operations of this type in the schema.
+    // Return the existing Schema Definition, or create an empty one.
+    val schemaDefinition: SchemaDefinition = if (stitchedOperationObject.fields.isEmpty) {
+      definitions.collectFirst[SchemaDefinition] {
+        case sd @ SchemaDefinition(_, _, _, _, _) => sd
+      }.getOrElse (SchemaDefinition(Vector.empty))
+    } else {
+      // Replace any existing SchemaDefinitions with this stitchOpType with a new combined definition
+      definitions.collectFirst[SchemaDefinition] {
+        case sd @ SchemaDefinition(_, _, _, _, _) =>
+          val unmodifiedOperationTypes: Vector[OperationTypeDefinition] = sd.operationTypes
+            .collect{ case otd @ OperationTypeDefinition(op, _, _, _) if op != stitchOpType => otd}
+          sd.copy(operationTypes = unmodifiedOperationTypes :+ queryOpTypeDef)}
+        // If there is no existing SchemaDefinition
+        // (because schemas used named Query|Mutation|Subscription objects), create a new one
+        .getOrElse{
+        SchemaDefinition(operationTypes = Vector(
+          OperationTypeDefinition(stitchOpType, NamedType(s"Stitched$stitchOpName", None), Vector.empty, None) ))}
+    }
+
+    // Filter out stitched items
+    val unmodifiedDefinitions: Vector[Definition] = definitions.filter {
+      case ObjectTypeDefinition(opName, _, _, _, _, _, _, _) if opName == stitchOpName => false
+        // Remove objects that were combined into the StitchedObject
+      case ObjectTypeDefinition(opName, _, _, _, _, _, _, _) if schemaObjectTypeNames.contains(opName) => false
+      case SchemaDefinition(_, _, _, _, _) => false
+      case _ => true
+    }
+
+    if (stitchedOperationObject.fields.isEmpty) {
+      unmodifiedDefinitions :+ schemaDefinition
+    }
+    else {
+      unmodifiedDefinitions :+ stitchedOperationObject :+ schemaDefinition
+    }
+  }
+
   def stitchSchemas(documents: Traversable[Document]): Document = {
     val originalSourceMappers = documents.flatMap(_.sourceMapper).toVector
     val sourceMapper =
       if (originalSourceMappers.nonEmpty) Some(AggregateSourceMapper.merge(originalSourceMappers))
       else None
 
-    val otherDefinitions: Vector[Definition] = documents.flatMap(_.definitions).toVector.filter{
-      case ObjectTypeDefinition("Query", _, _, _, _, _, _, _) => false
-      case ObjectTypeDefinition("Mutation", _, _, _, _, _, _, _) => false
-      case SchemaDefinition(_, _, _, _, _) => false
-      case _ => true
-    }
+    val definitions: Vector[Definition] = documents.flatMap(_.definitions).toVector
+    val stitchedQueries = stitchOperation(definitions, OperationType.Query)
+    val stitchedMutations = stitchOperation(stitchedQueries, OperationType.Mutation)
+    val stitchedSubscriptions = stitchOperation(stitchedMutations, OperationType.Subscription)
 
-    val queryFields: Vector[FieldDefinition] = documents
-      .flatMap(_.definitions).toVector
-      .collect{ case ObjectTypeDefinition("Query", _, fields , _, _, _, _, _) => fields }
-      .flatten
-    val queryDefinition = ObjectTypeDefinition("Query", Vector.empty, queryFields)
-
-    val mutationFields: Vector[FieldDefinition] = documents
-      .flatMap(_.definitions).toVector
-      .collect{ case ObjectTypeDefinition("Mutation", _, fields , _, _, _, _, _) => fields }
-      .flatten
-    val mutationDefinition = ObjectTypeDefinition("Mutation", Vector.empty, mutationFields)
-
-    val operationTypes: Vector[OperationTypeDefinition] = documents
-      .flatMap(_.definitions)
-      .collect{ case SchemaDefinition(opTypes, _, _, _, _) => opTypes }
-      .flatten
-       // Only take one of each operation type
-      .groupBy(_.operation.toString).map{ case (_, ops) => ops.head}.toVector
-    val schemaDefinition = SchemaDefinition(operationTypes)
-
-
-    Document(otherDefinitions ++ Vector(queryDefinition, mutationDefinition, schemaDefinition), Vector.empty, None, sourceMapper)
+    Document(stitchedSubscriptions, Vector.empty, None, sourceMapper)
   }
 
   def buildSchema = {
@@ -145,14 +189,22 @@ object Server extends App {
         case NotNullType(subType, _) =>
           fieldTypeResolver(subType)
         case ListType(subType, loc) =>
-          val listIDs = ctx.value.asInstanceOf[Map[String, Any]](field.name).asInstanceOf[Seq[String]]
-              .map(id => DeferredItem(id, subType.namedType.name, loc.get.sourceId))
-          DeferredMap(listIDs)
+          // TODO: How can I avoid writing additional nested match statements here?
+          subType match {
+            case NotNullType(NamedType("String", _), _) =>
+              ctx.value.asInstanceOf[Map[String, Any]](field.name).asInstanceOf[Vector[String]]
+            case NotNullType(NamedType(tpeName, namedLocation), nullLocation) =>
+              val listIDs = ctx.value.asInstanceOf[Map[String, Any]](field.name).asInstanceOf[Vector[String]]
+                .map(id => DeferredItem(id, tpeName, namedLocation.get.sourceId))
+              DeferredMap(listIDs)
+            case other =>
+              println(s"Got other type: $other")
+              ???
+          }
         case bork =>
           println(s"got bork: $bork")
       }
     }
-
     fieldTypeResolver(field.fieldType)
   }
 
